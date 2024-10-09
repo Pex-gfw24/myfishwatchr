@@ -9,6 +9,30 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE, eval = FALSE, warning = FALSE, message = FALSE, comment = FALSE, dpi = 200)
 ```
 
+Some notes to consider for the future:   
+Ran into some issues trying to install `fishwatchr` and connect to BigQuery, so these were the steps I took to fix these issues:   
+
+# Step 1
+Checking if I'm connected to the right/preferred guthub account when working with gfw data. initially I found that I was connected to my old personal github account (`Eplogan`, `logan23coding@gmail.com`). This was then following step 2 below.  
+`git_user <- system("git config --global user.name", intern = TRUE)`
+`git_email <- system("git config --global user.email", intern = TRUE)`
+
+Print the results
+`cat("Git User Name:", git_user, "\n")`
+`cat("Git User Email:", git_email, "\n")`
+
+# Step 2
+I configured my Git system settings from RStudio using the code below. This allowed me to disconnect from my previous personal github account and re-connect my RStudio to my new github account which uses my gfw email address.  
+`system("git config --global user.name 'Pex-gfw24'")`
+`system("git config --global user.email 'epeli.loganimoce@globalfishingwatch.org'")`
+
+# Step 3 
+I ran into some issues with BigQuery authentication; this was probably becasue of the change from my old personal github account to my new gfw github account. So I used the piece of code below to re-aunthenticatge with bigquery and was able to run the code in lines `197 - 212` 
+`library(bigrquery)`
+`bq_auth()`  # If you want to use default credentials
+
+
+
 Updated: `r Sys.Date()`
 
 # Overview
@@ -167,18 +191,6 @@ GROUP BY 1,2,3
 )
 ```
 
-
-Just checking whether I'm connected to the right GitHub account:
-```{r}
-# Check global Git configuration for user name and email
-git_user <- system("git config --global user.name", intern = TRUE)
-git_email <- system("git config --global user.email", intern = TRUE)
-
-# Print the results
-cat("Git User Name:", git_user, "\n")
-cat("Git User Email:", git_email, "\n")
-
-```
 
 Run the query and download the data:
 
