@@ -1,0 +1,969 @@
+---
+title: "myfishwatchr"
+author: "Epeli Loganimoce"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE, warning = FALSE, message = FALSE, comment = FALSE, dpi = 200)
+```
+
+Updated: `r Sys.Date()`
+
+# Overview
+
+`fishwatchr` is a R package for accessing Global Fishing Watch (GFW) data from
+Google BigQuery directly in R. The package contains simplified functions for
+getting and plotting data from Bigquery, as well as predefined `ggplot2` themes
+and color palettes.
+
+# Installation
+
+This R package is hosted on GitHub and can be installed using the `remotes`
+package. Run the following code to check if you already have `remotes` and
+install it if not.
+
+```{r}
+# Check/install remotes
+if (!require("remotes"))
+  install.packages("remotes")
+```
+
+To connect to GitHub, under the hood `remotes` calls the GitHub API. This means
+you’ll need to have a personal access token (PAT). Get a PAT here
+https://github.com/settings/tokens and make sure the “repo” scope is included.
+Save your PAT as an R environment variable (variables that should be available
+to R processes) by running `usethis::edit_r_environ()`, adding `GITHUB_PAT =
+"your PAT"`, and saving the updated `.Renviron` file. You might need to restart
+the R session.
+
+Finally, after saving your GitHub PAT to your R environment, install the
+`fishwatchr` package using `remotes`.
+
+```{r eval = FALSE}
+# Install fishwatchr
+remotes::install_github("GlobalFishingWatch/fishwatchr")
+```
+
+## Installing the Roboto Font
+
+GFW uses Roboto Font as our default font. Unfortunately, this is not a standard
+font and must be downloaded and installed on most computers.
+
++ Download Roboto from https://fonts.google.com/specimen/Roboto?selection.family=Roboto
++ On OsX install using FontBook
++ For Ubuntu, open the terminal (ctrl+alt+t) and type:
+<br> `sudo apt update` <br>
+`sudo apt install -y fonts-roboto`
+
+
+## Importing Roboto font to R (only neccesary on Windows)
+
+When you installed new fonts or updated R on your computer, you need to make 
+your fonts available from R in Windows.
+
+```{r eval = FALSE}
+# Check/install extrafont
+if (!require("extrafont"))
+  install.packages("extrafont")
+
+# Unfortunately `extrafont::font_import()` will fail on latest Rttf2pt1 package...
+# so we need to install old version
+devtools::install_version("Rttf2pt1", version = "1.3.8")
+
+# Import fonts to R
+# This will take few minutes
+extrafont::font_import()
+```
+
+
+## Installing `rnaturalearthhires`
+
+For some regional plots, the package uses functions from `rnaturalearthhires`.
+We recommend installing the package using the following code:
+
+```{r, eval = FALSE}
+install.packages("rnaturalearthhires",
+                          repos = "http://packages.ropensci.org",
+                          type = "source")
+```
+
+## Starting with `fishwatchr`
+
+Once everything is installed, you can load and use `fishwatchr` in your scripts
+with `library(fishwatchr)`
+
+```{r, eval=TRUE, message=FALSE, warning=FALSE}
+# Load fishwatchr
+library(fishwatchr)
+# Other useful packages
+library(tidyverse)
+library(glue)
+```
+
+# Connect to BigQuery
+
+The first step to using `fishwatchr` is to set up your connection to a GFW
+BigQuery project using the `DBI::dbConnect()` function. Specify
+`bigrquery::bigquery()` as the driver and set the `project` argument to the
+desired GFW BigQuery project. If you don't have the `DBI` and `bigrquery`
+packages, install them first with `install.packages(c('DBI', 'bigrquery'))`.
+
+```{r, eval=TRUE}
+# Establish connection to BigQuery project
+con <- DBI::dbConnect(drv = bigrquery::bigquery(),
+                      project = "world-fishing-827",
+                      use_legacy_sql = FALSE)
+```
+
+# Querying data
+
+Most of the time, we run BigQuery queries from R in order to pull data into R
+for further analysis. Sometimes, however, you may want to save the results of
+the query directly in BigQuery. To facilitate both options, `fishwatchr`
+includes the `gfw_query()` function, which takes a query string, runs the query 
+in BigQuery, and either downloads the results locally and/or saves the results 
+to a BigQuery table.
+
+The first step is to save your query as a string:
+
+```{r}
+effort_query <- c(
+"
+SELECT
+  EXTRACT(year from _partitiontime) as year,
+  floor(lat_bin / 100) lat_bin,
+  floor(lon_bin / 100) lon_bin,
+  SUM(fishing_hours) fishing_hours
+FROM  `gfw_draft_data.fishing_effort_v20190227`
+WHERE EXTRACT(year FROM _partitiontime) = 2018
+AND fishing_hours > 0
+GROUP BY 1,2,3
+"
+)
+```
+
+**Parameterizing a query:** The `glue()` and `glue_sql()` functions from the
+`glue` package can also be used to format your query with R variables:
+
+```{r, eval=T}
+# Year to query
+query_year <- 2018
+
+# Format query with the R variable 'query_year'
+effort_query <- glue::glue(
+"
+SELECT
+  EXTRACT(year from _partitiontime) as year,
+  floor(lat_bin / 100) lat_bin,
+  floor(lon_bin / 100) lon_bin,
+  SUM(fishing_hours) fishing_hours
+FROM  `gfw_draft_data.fishing_effort_v20190227`
+WHERE EXTRACT(year FROM _partitiontime) = {query_year}
+AND fishing_hours > 0
+GROUP BY 1,2,3
+"
+)
+```
+
+
+Just checking whether I'm connected to the right GitHub account:
+```{r}
+# Check global Git configuration for user name and email
+git_user <- system("git config --global user.name", intern = TRUE)
+git_email <- system("git config --global user.email", intern = TRUE)
+
+# Print the results
+cat("Git User Name:", git_user, "\n")
+cat("Git User Email:", git_email, "\n")
+
+```
+
+Run the query and download the data:
+
+```{r, eval=T}
+effort_df <- gfw_query(query = effort_query,
+                       run_query = TRUE,
+                       con = con)
+```
+
+Alternatively, run the query and save the data to BigQuery:
+
+```{r}
+gfw_query(query = effort_query,
+          run_query = TRUE,
+          save_query = TRUE,
+          destination_dataset = '0_ttl24h',
+          destination_table = 'gfw_query_test',
+          con = con)
+```
+
+
+# Plotting functions
+
+`fishwatchr` contains numerous functions for making charts and maps that adhere to the [GFW Data Visualization Guide](https://docs.google.com/document/d/1GR3hzPTGsDRQSG6aGtKknzLfoIV8xuSbY2I4cRPpQlU/edit?usp=sharing):
+
++ Color palettes: `gfw_palette()`
++ Plot themes: `gfw_theme()` and `gfw_theme_map()`
++ Analysis charts: `plot_donut_chart()` and `plot_raincloud()`
++ Maps: `gfw_map()`, `geom_gfw_land()`, `geom_gfw_eez()`, `plot_vessel_track()`,
+and `vessel_track_review()`
++ GFW logos
+
+Most plotting functions return a `ggplot2` object/layer that can be further
+customized.
+
+## GFW color palettes
+
+GFW has a series of color palettes that are used in our communications and it is
+important that these palettes also be used consistently in our analyses. These
+palettes are stored in the list object `gfw_palettes` and can be accessed either
+via calling the list directly (e.g. `gfw_palettes['palette name'])` or via the
+`gfw_palette()` function, which provides additional functionality.
+
+```{r, eval=TRUE, out.width=200}
+for (p in names(gfw_palettes)) {
+ print(gfw_palette(p))
+}
+```
+
+## Plot themes and customization
+
+To make it easy to produce plots that adhere to the set of chart aesthetics (e.g.
+background color, font, gridlines, etc.) outlined in the GFW Data Viz
+guidelines, `fishwatchr` includes the custom `ggplot2` themes `theme_gfw()` and
+`theme_gfw_map()`.
+
+To demonstrate, let's pull a sample of vessel information data to plot:
+
+```{r, eval=T}
+vi_query <- c("
+SELECT
+  ssvid,
+  best.best_vessel_class,
+  best.best_length_m,
+  best.best_tonnage_gt,
+  best.best_engine_power_kw,
+  best.best_flag
+FROM
+`gfw_research.vi_ssvid_v20200801`
+WHERE best.best_flag IN ('NZL','FJI','KIR') AND
+best.best_vessel_class IN (
+'squid_jigger','trawlers','cargo','tanker','bunker',
+'reefer','tuna_purse_seines','drifting_longlines',
+'specialized_reefer') AND
+best.best_length_m IS NOT NULL AND
+best.best_tonnage_gt IS NOT NULL AND
+best.best_engine_power_kw IS NOT NULL
+")
+
+vi <- gfw_query(vi_query, run_query = T, con = con)
+```
+
+Let's plot the relationship between vessel length and tonnage and apply the GFW
+theme. We'll also use the GFW `chart` color palette to color the points by flag
+state:
+
+```{r, eval=T, fig.width=6, fig.height=4}
+basic_chart <- vi$data %>%
+  ggplot() +
+  geom_point(aes(x = best_length_m,
+                 y = best_tonnage_gt,
+                 color = best_flag)) +
+  scale_color_manual(values = gfw_palette('chart')) +
+  labs(title = 'Relationship between vessel length and tonnage',
+       x = 'Length (m)',
+       y = 'Tonnage (gt)',
+       color = 'Flag state') +
+  theme_gfw()
+
+basic_chart
+```
+
+You can further customize your chart's theme by adding elements to another
+`theme()` layer. For example, let's move the legend to the bottom of the plot:
+
+```{r, eval=T, fig.width=6, fig.height=4}
+vi$data %>%
+  ggplot() +
+  geom_point(aes(x = best_length_m,
+                 y = best_tonnage_gt,
+                 color = best_flag)) +
+  scale_color_manual(values = gfw_palette('chart')) +
+  labs(title = 'Relationship between vessel length and tonnage',
+       x = 'Length (m)',
+       y = 'Tonnage (gt)',
+       color = 'Flag state') +
+  theme_gfw() +
+  theme(legend.position = 'bottom')
+```
+
+## Analysis plots
+
+`fishwatchr` provides several custom plotting functions to produce useful plots
+for Analysis Cell reports and data exploration, including donut plots and
+raincloud plots.
+
+### Donut chart
+
+A donut chart is a modified pie chart and a nice way to show proportional data
+in a commonly understood format. The `plot_donut_chart()` function provides an
+easy way to make these.
+
+```{r, eval=T, fig.height=5, fig.width=5}
+vi$data %>%
+  group_by(best_vessel_class) %>%
+  summarize(MMSI = n()) %>%
+  plot_donut_chart(group_var = best_vessel_class,
+                   value_var = MMSI,
+                   donut_title = 'Fishing vessels by\nvessel class') +
+  labs(fill = 'Vessel class')
+```
+
+There are several arguments for customizing the donut chart, including adding
+labels (`add_labels`) and removing the legend (`show_legend`). Additionally, the
+default donut chart will group all categories with a fraction less than 5% into
+an `other` category. This threshold can be adjusted using the `label_frac`
+argument and the categories grouped into the `other` category can be displayed
+in a caption using `show_caption`:
+
+```{r, eval=T, fig.height=5, fig.width=5}
+vi$data %>%
+  group_by(best_vessel_class) %>%
+  summarize(MMSI = n()) %>%
+  plot_donut_chart(group_var = best_vessel_class,
+                   value_var = MMSI,
+                   donut_title = 'Fishing vessels by\nvessel class',
+                   add_labels = T,
+                   show_legend = F,
+                   label_frac = 0.1,
+                   show_caption = T)
+```
+
+### Raincloud chart
+
+Raincloud plots are a useful way to inspect distributions. They combine a
+split-half violin plot and a boxplot for the shape of the distribution, with a
+jittered cloud of points. While these plots aren't always great for a
+non-technical audience, they're very helpful for data exploration and can be
+generated with the `plot_raincloud()` function.
+
+We'll demonstrate with `best_tonnage_gt`, setting `1` as the `group_var` to
+inspect the gross tonnage of all vessels in the dataset.
+
+```{r, eval=T, fig.width=4, fig.height=2}
+plot_raincloud(vi$data,
+  group_var = 1,
+  value_var = best_tonnage_gt,
+  label_list = list(
+    ylab = "Gross Tonnage (GT)",
+    plot_title = "Gross Tonnage"
+  )
+)
+```
+
+Use the `group_var` argument to plot the distributions of vessel tonnage by
+different groups, such as by flag state:
+
+```{r, eval=T, fig.width=6, fig.height=4}
+plot_raincloud(vi$data,
+  group_var = best_flag,
+  value_var = best_tonnage_gt,
+  label_list = list(
+    ylab = "Gross Tonnage (GT)",
+    xlab = "Flag",
+    plot_title = "Gross Tonnage by Flag State"
+  )
+) +
+# fix the axis labels which are otherwise the ISO3 in title case
+  scale_x_discrete("",
+    breaks = c("KIR", "FJI", "NZL"),
+    labels = c("Kiribati", "Fiji", "New Zealand")
+  )
+```
+
+
+## Mapping functions
+
+Maps are one of the most common and important ways to visualize GFW data. These
+maps often include a mix of raster data, such as gridded fishing effort, and
+vector data, such as vessel tracks and jurisdictional boundaries (e.g. EEZs,
+RFMOs). To facilitate map making, `fishwatchr` includes a function to make a
+ggplot basemap (`gfw_map()`), geoms for better configuration of the maps (e.g.
+`geom_gfw_eez`, `geom_gfw_land`) and for easily plotting and reviewing vessel
+tracks (e.g. `fishing_track_review()`).
+
+### Base maps
+
+Quick and dirty base maps using the GFW style can be generated with `gfw_map()`
+and include options for using a `dark` or `light` theme, including EEZ
+boundaries, and using a higher or lower resolution land layer:
+
+```{r, eval=TRUE, fig.width=8, fig.height=4}
+gfw_map(theme = 'dark', eezs = T, res = 110)
+```
+
+### GFW geoms
+
+While `gfw_map()` is great for quick and dirty maps, it has some flaws and
+limitations that can make it hard to use for external/publication quality
+graphics. As an alternative, `fishwatchr` provides individual geoms
+(`geom_gfw_land()` and `gfw_geom_eez()`) that allow you to build maps
+layer-by-layer in a more normal fashion.
+
+```{r, eval=TRUE, fig.width=8, fig.height=4}
+ggplot() +
+  geom_gfw_eez() +
+  geom_gfw_land() +
+  theme_gfw_map()
+```
+
+*Note:* By default these geoms use the Equal Earth projection (the approved
+projection for GFW global maps) and are centered at longitude 0. If we wanted to
+approximate the `gfw_map()` function we would have to specify the alternate map
+projection WGS84 or (`proj = '+proj=longlat'`).
+
+Alternative central longitudes are possible using the `center` parameter.
+
+
+```{r, eval=TRUE, fig.width=8, fig.height=4}
+ggplot() +
+  geom_gfw_eez(center = 160) +
+  geom_gfw_land(center = 160) +
+  theme_gfw_map()
+```
+
+
+These geoms take the same `theme` argument as `gfw_map()`:
+
+```{r, eval=TRUE, fig.width=8, fig.height=4}
+ggplot() +
+  geom_gfw_eez(theme = 'light') +
+  geom_gfw_land(theme = 'light') +
+  theme_gfw_map(theme = 'light')
+```
+
+### Mapping fishing data
+
+Now let's add the fishing effort data we downloaded using `geom_raster()` to
+complete the map:
+
+```{r, eval=T, fig.width=8, fig.height=4}
+effort_df$data %>%
+  recenter_raster(raster_df = .,
+                  res = 1,
+                  x_lab = 'lon_bin',
+                  y_lab = 'lat_bin',
+                  fill_lab = 'fishing_hours',
+                  center = 0) %>%
+  ggplot() +
+  geom_raster(aes(x = lon_bin,
+                  y = lat_bin,
+                  fill = fishing_hours)) +
+  geom_gfw_land() +
+  geom_gfw_eez(alpha = 0.05) +
+  scale_fill_gradientn(colors = gfw_palette('map_effort_dark'),
+                       limits = c(0,10000),
+                       oob = scales::squish,
+                       na.value = NA) +
+  labs(fill = 'Fishing hours') +
+  theme_gfw_map()
+```
+
+By specifying a single, new central longitude for both the raster and the
+land/eez shapes can be recentered.
+
+```{r, eval=T, fig.width=8, fig.height=4}
+effort_df$data %>%
+  recenter_raster(raster_df = .,
+                  res = 1,
+                  x_lab = 'lon_bin',
+                  y_lab = 'lat_bin',
+                  fill_lab = 'fishing_hours',
+                  center = 160) %>%
+  ggplot() +
+  geom_raster(aes(x = lon_bin,
+                  y = lat_bin,
+                  fill = fishing_hours)) +
+  geom_gfw_eez(center = 160) +
+  geom_gfw_land(center = 160) +
+  scale_fill_gradientn(colors = gfw_palette('map_effort_dark'),
+                       limits = c(0,10000),
+                       oob = scales::squish,
+                       na.value = NA) +
+  labs(fill = 'Fishing hours') +
+  theme_gfw_map()
+```
+
+*Note:* Using `geom_raster()` after the `geom_gfw_*` will plot the raster data
+on top of the land and EEZ layers
+
+<br>
+<br>
+
+## Projections
+
+The `gfw_projections()` function can be used to plot data with specific
+projections chosen by GFW. These projections are stored in the
+`projection_defaults` named list object, which includes an extent and CRS
+projection string for each projection. To get the names of the available
+projections run `names(projection_defaults)`. For an introduction to CRS and
+projections, there is a nice [tutorial by Anna Krystalli](https://annakrystalli.me/intro-r-gis/gis.html).
+
+We can now reproject our base map using `coord_sf()` and `gfw_projections()`:
+
+```{r, fig.width=8, fig.height=4, eval=TRUE}
+ggplot() +
+  geom_gfw_land() +
+  coord_sf(crs = gfw_projections("Equal Earth")$proj) +
+  labs(title = 'Equal Earth projection') +
+  theme_gfw_map()
+```
+
+<br>
+<br>
+
+## Regional maps
+
+The function `transform_box()` allows you to specify a bounding box in
+traditional `lon/lat` format, which is easier to conceptualize, but then project
+that bounding box into any output projection.
+
+Here we use this along with `coord_sf()` and the `gfw_projections()` shown above
+to generate a regional map.
+
+```{r, fig.width=8, fig.height=6, eval = TRUE}
+bounding <- transform_box(xlim = c(-20, 30),
+                          ylim = c(30, 65),
+                          output_crs = fishwatchr::gfw_projections("North Atlantic")$proj_string)
+
+(regional_map_light <- gfw_map(theme = 'light', res = 10) +
+  coord_sf(xlim = c(bounding$box_out[['xmin']], bounding$box_out[['xmax']]),
+           ylim = c(bounding$box_out[['ymin']], bounding$box_out[['ymax']]),
+           crs = bounding$out_crs))
+```
+
+<br>
+
+### Adding Context with Little Globe
+
+Once we have generated a regional map we can add context to this main map with
+an inset global map using the `add_little_globe()` function. Just specify the
+primary map, the bounding box you used to create it, and some features for the
+little globe.
+
+```{r, fig.width=8, fig.height=6, eval = TRUE}
+add_little_globe(main_map = regional_map_light,
+                 main_box = bounding,
+                 globe_rel_size = 0.2,
+                 globe_just = 'center',
+                 globe_position = 'upperright')
+```
+
+<br>
+
+The little globe takes the theme of the main map, so if you change to the
+`"dark"` theme in your main map, the little globe changes too.
+
+```{r, fig.width=8, fig.height=6, eval = TRUE}
+regional_map_dark <- gfw_map(theme = 'dark', res = 10) +
+  coord_sf(xlim = c(bounding$box_out[['xmin']], bounding$box_out[['xmax']]),
+           ylim = c(bounding$box_out[['ymin']], bounding$box_out[['ymax']]),
+           crs = bounding$out_crs) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0))
+
+add_little_globe(main_map = regional_map_dark,
+                 main_box = bounding,
+                 globe_rel_size = 0.2,
+                 globe_just = 'center',
+                 globe_position = 'upperright')
+```
+
+<br>
+<br>
+
+## Plotting vessel tracks
+
+*Note:* These functions require the input data to have `nnet_score`, even if you
+don't want to plot fishing or the vessel is not a fishing vessel. `This will be
+updated in the future`
+
+
+### Track Information Plots
+
+Let's start with a query example generating a vessel track dataframe called
+`vessel_track`.
+
+#### Query Example Track
+
+```{sql connection = con, output.var = "vessel_track", warnings = FALSE, echo = TRUE, eval = TRUE}
+SELECT
+ssvid,
+lon,
+lat,
+timestamp,
+speed_knots,
+-1 * elevation_m AS depth_m,
+distance_from_shore_m/1000 AS distance_from_shore_km,
+nnet_score
+FROM
+`gfw_research.pipe_v20190502_fishing`
+WHERE seg_id IN (
+SELECT seg_id
+FROM `gfw_research.pipe_v20190502_segs`
+WHERE
+overlapping_and_short IS FALSE AND
+good_seg IS TRUE) AND
+ssvid = '263477000' AND
+date BETWEEN TIMESTAMP('2020-05-15') AND TIMESTAMP('2020-06-01') AND
+nnet_score IS NOT NULL
+ORDER BY timestamp
+```
+
+
+The `fishing_track_review()` function is useful for mapping a vessel track along
+with visualizing several track variables in a timeseries. Currently supported
+variables are `speed_knots`,`depth_m`,`distance_from_shore_km`, `lon`, and
+`lat`. The example below will use the `vessel_track` dataframe we just queried.
+
+
+```{r, fig.width=8, fig.height=11, eval = TRUE}
+fishing_track_review(track_df = vessel_track,
+                     color_fishing = TRUE,
+                     globe_location = 'lowerright',
+                     time_series_labels = c('speed_knots','depth_m','distance_from_shore_km'),
+                     vessel_name = 'VELLINO')
+```
+
+<br>
+<br>
+
+### Remove fishing color-coding
+
+We can plot the vessel track without fishing information. Let's illustrate it 
+using data from a second query example.
+
+
+```{sql connection = con, output.var = "vessel_track2", warnings = FALSE, echo = TRUE, eval = TRUE}
+SELECT
+ssvid,
+lon,
+lat,
+timestamp,
+speed_knots,
+-1 * elevation_m AS depth_m,
+distance_from_shore_m/1000 AS distance_from_shore_km,
+nnet_score
+FROM
+`gfw_research.pipe_v20190502_fishing`
+WHERE seg_id IN (
+SELECT seg_id
+FROM `gfw_research.pipe_v20190502_segs`
+WHERE
+overlapping_and_short IS FALSE AND
+good_seg IS TRUE) AND
+ssvid = '204862000' AND
+date BETWEEN TIMESTAMP('2020-03-06') AND TIMESTAMP('2020-04-06') AND
+nnet_score IS NOT NULL
+ORDER BY timestamp
+```
+
+
+```{r, fig.width=8, fig.height=11, eval = TRUE}
+fishing_track_review(track_df = vessel_track2,
+                     color_fishing = FALSE,
+                     globe_location = 'upperright',
+                     theme = 'light',
+                     time_series_labels = c('lon','lat','speed_knots'),
+                     vessel_name = 'COSTA DE S. JORGE')
+
+```
+
+
+<br>
+<br>
+
+
+
+### Vessel track map without time series
+
+Set the `time_series_labels` to `NA` and simply produce a vessel track map
+
+```{r, fig.width=8, fig.height=11, eval = TRUE}
+fishing_track_review(track_df = vessel_track2,
+                     color_fishing = TRUE,
+                     globe_location = 'upperright',
+                     theme = 'dark',
+                     time_series_labels = NA,
+                     vessel_name = 'COSTA DE S. JORGE')
+
+```
+
+<br>
+
+### Adjust the size of the bounding box
+
+The current default is for the plot to buffer the track 0.5 degrees in each
+direction. It's possible to generate your own bounding box and then use that as
+input to the `fishing_track_review()` function using the `bounding_box_man`
+parameter.
+
+*Note:* When using this feature you must ensure that the `gfw_projection` in the
+for the bounding box (in this case `Equal Earth`) is also specified in
+`fishing_track_review`.
+
+```{r, eval = TRUE}
+# new bounding box buffered 10 degrees
+bounding <- transform_box(xlim = c(min(vessel_track$lon) - 10,
+                                   max(vessel_track$lon) + 10),
+                          ylim = c(min(vessel_track$lat) - 10,
+                                   max(vessel_track$lat) + 10),
+                          output_crs = gfw_projections('Equal Earth')$proj)
+```
+
+
+```{r, fig.width=8, fig.height=11, eval = TRUE}
+# generate new plot using `bounding_box_man`.
+fishing_track_review(track_df = vessel_track,
+                     bounding_box_man = bounding,
+                     gfw_proj_name = 'Equal Earth',  # must be the same as the bounding box
+                     color_fishing = TRUE,
+                     globe_location = 'upperright',
+                     theme = 'dark',
+                     time_series_labels = NA,
+                     vessel_name = 'COSTA DE S. JORGE')
+
+```
+
+
+## Adding the GFW logo
+
+The last step for plots and maps that will be shared externally is to add the
+GFW logo. This is one of the most requested features but also a rather
+challenging thing to implement. Here we provide some details about how to add
+logos, but you will almost always have to manually tweak the options to get
+things right.
+
+There are two versions of the GFW logo available in `fishwatchr`, each with three color options (`"color"`, "`white`", "`black`").
+
+```{r, eval=T, echo=F, fig.width=10, fig.height=7}
+logo_plot <- ggplot() +
+  annotation_custom(gfw_logo) +
+  theme_gfw()
+
+logo_w_plot <- ggplot() +
+  annotation_custom(gfw_logo_white) +
+  theme_gfw()
+
+logo_b_plot <- ggplot() +
+  annotation_custom(gfw_logo_black) +
+  theme_gfw()
+
+logo2_plot <- ggplot() +
+  annotation_custom(gfw_logo2) +
+  theme_gfw()
+
+logo2_w_plot <- ggplot() +
+  annotation_custom(gfw_logo2_white) +
+  theme_gfw()
+
+logo2_b_plot <- ggplot() +
+  annotation_custom(gfw_logo2_black) +
+  theme_gfw()
+
+logo_plot + logo_w_plot + logo_b_plot + logo2_plot + logo2_w_plot + logo2_b_plot + patchwork::plot_layout(ncol = 3)
+```
+
+<br>
+
+### Adding logos to maps
+
+Make a basic map:
+
+```{r, eval = TRUE}
+map_light <- gfw_map(theme = 'light') +
+  coord_sf(crs = gfw_projections('Equal Earth')$proj_string)
+
+```
+
+Add a `color` logo to the map:
+
+```{r, fig.width=10, fig.height=7, eval = TRUE}
+add_logo(map_light,
+         logo_rel_size = 0.1,
+         style = 'color')
+```
+
+<br>
+
+When using the `dark` map theme, we may want to instead add a `white` logo.
+
+```{r, fig.width=10, fig.height=7, eval = TRUE}
+main_map_dark <- gfw_map(theme = 'dark') +
+  coord_sf(crs = gfw_projections('Equal Earth')$proj_string)
+
+add_logo(main_map_dark,
+         logo_rel_size = 0.1,
+         style = 'white',
+         logo_position = 'lowerleft',
+         logo_just = 'inside')
+```
+
+This does put the logo far to the left and perhaps further than you want. See
+below for how to adjust that manually so it looks a bit better.
+
+*Note:* you can pipe (`%>%`) the map directly into `add_logo`.
+
+<br>
+
+### Adding logos to charts
+
+Here we add the color logo in the lower right corner inside the plot (on the plot panel).
+
+```{r, fig.width=6, fig.height=4, eval = TRUE}
+add_logo(basic_chart,
+         logo_rel_size = 0.1,
+         style = 'color',
+         logo_position = 'lowerright',
+         logo_just = 'inside',
+         secondary_logo = T)
+```
+
+You can place the logo outside of the plot panel, but you have to provide a location
+for it. Here we increase the bottom margin so we can place the logo below the plot panel.
+
+```{r, eval = TRUE}
+basic_chart2 <- basic_chart +
+  theme(plot.margin = margin(1, 1, 2, 1, "cm"))  # margin: top, right, bottom, left
+```
+
+
+
+```{r, fig.width=6, fig.height=4, eval = TRUE}
+add_logo(basic_chart2,
+         logo_rel_size = 0.1,
+         style = 'color',
+         logo_position = 'lowerright',
+         logo_just = 'outside')
+```
+
+<br>
+<br>
+
+You can manually specify the relative location of the logo in the plot using
+`xloc` and `yloc`. The justification of the logo is still set by `logo_just` and
+`logo_position` so sometimes you have to play with these to get exactly what you
+want.
+
+```{r, fig.width=6, fig.height=4, eval = TRUE}
+add_logo(basic_chart,
+         logo_rel_size = 0.2,
+         xloc = 0.5,
+         yloc = 0.5,
+         style = 'color',
+         logo_just = 'center',
+         secondary_logo = T)
+```
+
+Placing logo on a regional map:
+
+```{r,fig.width=8, fig.height=8, eval = TRUE}
+bounding <- fishwatchr::transform_box(xlim = c(40, 100),
+                                      ylim = c(40, -20),
+                                      output_crs = fishwatchr::gfw_projections('Indian')$proj_string)
+
+regional_map_light <- gfw_map(theme = 'light') +
+  coord_sf(xlim = c(bounding$box_out[['xmin']],
+                    bounding$box_out[['xmax']]),
+           ylim = c(bounding$box_out[['ymin']],
+                    bounding$box_out[['ymax']]),
+           crs = bounding$out_crs) +
+  theme(plot.margin = margin(2, 2, 2, 2, 'cm')) # note: top, right, bottom, left margin
+```
+
+
+<br>
+<br>
+
+Place the logo in upper right location outside the plot panel:
+
+```{r,fig.width=8, fig.height=8, eval = TRUE}
+add_logo(regional_map_light,
+         style = 'color',
+         logo_rel_size = 0.3,
+         logo_position = 'upperright',
+         logo_just = 'outside')
+```
+
+
+<br>
+<br>
+
+Place the logo in lower right location inside the plot panel:
+
+```{r,fig.width=8, fig.height=8, eval = TRUE}
+add_logo(regional_map_dark,
+         style = 'color',
+         logo_rel_size = 0.3,
+         logo_position = 'lowerright',
+         logo_just = 'inside')
+```
+
+Add a bounding box to the plot:
+
+```{r,fig.width=8, fig.height=8, eval = TRUE}
+bounding <- transform_box(xlim = c(-20, 30),
+                          ylim = c(30, 65),
+                          output_crs = fishwatchr::gfw_projections("North Atlantic")$proj_string)
+regional_map_dark %>%
+  add_logo(.,
+         style = 'white',
+         logo_rel_size = 0.3,
+         logo_position = 'lowerright',
+         logo_just = 'inside') %>%
+  add_little_globe(.,
+                   main_box = bounding,
+                   globe_rel_size = 0.2,
+                   globe_just = 'inside',
+                   globe_position = 'upperright')
+
+```
+
+# Creating your own package or project
+
+The function `make_pkg_proj` allows you to create your own package or project.
+You need to specify the path of the location of the new project/package in
+your local computer (`path`), the name for the project/package (`name`), and
+whether it's a package or a project (`package = TRUE` or `package = FALSE`).
+Additional arguments include whether checking if the name is compatible with
+CRAN conventions (`checkname`), using version control with git (`use_git`),
+and creating a repository on github (`use_github`), among others.
+By default, using version control with git will also imply using a precommit
+yaml that is extracted from the [research-python-template](https://github.com/GlobalFishingWatch/research-python-template)
+.
+You can either use another precommit file by changing the arguments `repo_yaml`,
+`path_yaml`, and `gh_account`, or not use a precommit file by setting
+`use_precommit = FALSE`.
+
+A simple example to create a package:
+
+```{r, eval = FALSE}
+ path <- "."
+ name <- "research-r-example"
+ make_pkg_proj(name, path, checkname = FALSE, use_git = TRUE,
+               use_github = TRUE, use_precommit = TRUE)
+```
+
+
+# Questions or suggestions for us?
+
+  * Got any particular problem with `fishwatchr`? Or a suggestion to improve or
+add functions/documentation? Please [open an
+issue](https://github.com/GlobalFishingWatch/fishwatchr/issues) and we'll take
+care of it as soon as we can.
+
+  * Got a new function that can be added to `fishwatchr`? You improved a
+`fishwatchr` function? Please [make a pull
+request](https://github.com/GlobalFishingWatch/fishwatchr/pulls)
