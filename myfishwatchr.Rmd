@@ -5,7 +5,16 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
+I had to update my R.version today (24/10/24) over suspicious that this may be the issue causing errors in line 660 inwards on plotting vessel tracks. 
+# Global Options
 ```{r setup, include=FALSE}
+install.packages("knitr")
+install.packages("tidyverse")
+install.packages("glue")
+install.packages("usethis")
+library(usethis)
+library(knitr)
+
 knitr::opts_chunk$set(echo = TRUE, eval = FALSE, warning = FALSE, message = FALSE, comment = FALSE, dpi = 200)
 ```
 
@@ -17,9 +26,20 @@ Checking if I'm connected to the right/preferred guthub account when working wit
 `git_user <- system("git config --global user.name", intern = TRUE)`
 `git_email <- system("git config --global user.email", intern = TRUE)`
 
+```{r}
+#git_user <- system("git config --global user.name", intern = TRUE)  #..Verifying the github account...#
+#git_email <- system("git config --global user.email", intern = TRUE)  #..Verifying the github account...#
+```
+
 Print the results
 `cat("Git User Name:", git_user, "\n")`
 `cat("Git User Email:", git_email, "\n")`
+
+```{r}
+#cat("Git User Name:", git_user, "\n")   #..Verifying the github account...#
+#cat("Git User Email:", git_email, "\n")  #..Verifying the github account...#
+```
+
 
 # Step 2
 I configured my Git system settings from RStudio using the code below. This allowed me to disconnect from my previous personal github account and re-connect my RStudio to my new github account which uses my gfw email address.  
@@ -27,7 +47,7 @@ I configured my Git system settings from RStudio using the code below. This allo
 `system("git config --global user.email 'epeli.loganimoce@globalfishingwatch.org'")`
 
 # Step 3 
-I ran into some issues with BigQuery authentication; this was probably becasue of the change from my old personal github account to my new gfw github account. So I used the piece of code below to re-aunthenticatge with bigquery and was able to run the code in lines `197 - 212` 
+I ran into some issues with BigQuery authentication; this was probably becasue of the change from my old personal github account to my new gfw github account. So I used the piece of code below to re-authentication with bigquery and was able to run the code in lines `197 - 212` 
 `library(bigrquery)`
 `bq_auth()`  # If you want to use default credentials
 
@@ -64,10 +84,12 @@ the R session.
 
 Finally, after saving your GitHub PAT to your R environment, install the
 `fishwatchr` package using `remotes`.
+Tried this code, `remotes::install_github("GlobalFishingWatch/fishwatchr")` but somehow the package `fishwatchr` was not being loaded in so i removed the `remotes::` and just ran `install_github("GlobalFishingWatch/fishwatchr")` which was then successful in loading the package in.
 
 ```{r eval = FALSE}
+
 # Install fishwatchr
-remotes::install_github("GlobalFishingWatch/fishwatchr")
+install_github("GlobalFishingWatch/fishwatchr")
 ```
 
 ## Installing the Roboto Font
@@ -87,18 +109,19 @@ font and must be downloaded and installed on most computers.
 When you installed new fonts or updated R on your computer, you need to make 
 your fonts available from R in Windows.
 
+I did not run this piece of code becase I already have the font installed in my Macbook machnine.
 ```{r eval = FALSE}
 # Check/install extrafont
-if (!require("extrafont"))
-  install.packages("extrafont")
+#if (!require("extrafont"))
+  #install.packages("extrafont")
 
 # Unfortunately `extrafont::font_import()` will fail on latest Rttf2pt1 package...
 # so we need to install old version
-devtools::install_version("Rttf2pt1", version = "1.3.8")
+#devtools::install_version("Rttf2pt1", version = "1.3.8")
 
 # Import fonts to R
 # This will take few minutes
-extrafont::font_import()
+#extrafont::font_import()
 ```
 
 
@@ -118,12 +141,15 @@ install.packages("rnaturalearthhires",
 Once everything is installed, you can load and use `fishwatchr` in your scripts
 with `library(fishwatchr)`
 
+I also had to install `tidyverse` and `glue` packages  
+
 ```{r, eval=TRUE, message=FALSE, warning=FALSE}
 # Load fishwatchr
 library(fishwatchr)
 # Other useful packages
 library(tidyverse)
 library(glue)
+library(rnaturalearthhires)
 ```
 
 # Connect to BigQuery
@@ -133,6 +159,8 @@ BigQuery project using the `DBI::dbConnect()` function. Specify
 `bigrquery::bigquery()` as the driver and set the `project` argument to the
 desired GFW BigQuery project. If you don't have the `DBI` and `bigrquery`
 packages, install them first with `install.packages(c('DBI', 'bigrquery'))`.
+
+Ran into some issues with my bigquesry `auth` so i had to run this piece of code: `library(bigrquery) bq_auth()`. That send me back ot the browser and I aunthenticated using my gfw google account and masking sure that the `select all` box is checked before continuing.  
 
 ```{r, eval=TRUE}
 # Establish connection to BigQuery project
@@ -640,6 +668,7 @@ with visualizing several track variables in a timeseries. Currently supported
 variables are `speed_knots`,`depth_m`,`distance_from_shore_km`, `lon`, and
 `lat`. The example below will use the `vessel_track` dataframe we just queried.
 
+Note: After successfully updating my R.version to 4.4.1 today (24/10/24), I was able to run the chunk of code below successfully. 
 
 ```{r, fig.width=8, fig.height=11, eval = TRUE}
 fishing_track_review(track_df = vessel_track,
